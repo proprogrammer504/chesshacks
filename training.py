@@ -525,5 +525,5 @@ if __name__ == "__main__":
     network = train_with_parallel_mcts(
         iterations=50, 
         games_per_iter=20,
-        num_workers=max(1, 1)
+        num_workers=max(1, mp.cpu_count())
     )
