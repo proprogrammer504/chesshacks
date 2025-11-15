@@ -45,7 +45,7 @@ class CNNChessNet(nn.Module):
             x = x.permute(0, 3, 1, 2)
         
         shared_conv = self.conv_base(x)
-        shared_flat = shared_conv.view(-1, self.fc_input_dim)
+        shared_flat = shared_conv.reshape(-1, self.fc_input_dim)
         
         shared_final = self.shared_fc(shared_flat)
         
@@ -329,7 +329,7 @@ def parallel_self_play_worker(worker_id, network_state_dict, num_games, result_q
     env = BoardEncoding(env, history_length=1) # Stateless (8,8,21) observations
     env = MoveEncoding(env)                     # 4672 actions
     
-    network = CNNChessNet(net_config['input_dim'], net_config['num_actions'])
+    network = CNNChessNet(net_config['input_channels'], net_config['num_actions'])    
     network.load_state_dict(network_state_dict)
     network.eval()
     
@@ -401,14 +401,15 @@ def train_with_parallel_mcts(iterations=100, games_per_iter=25, num_workers=None
     env = BoardEncoding(env, history_length=1)
     env = MoveEncoding(env)
     
-    input_dim = np.prod(env.observation_space.shape) # 8*8*21 = 1344
-    num_actions = env.action_space.n               # 4672
-    net_config = {'input_dim': input_dim, 'num_actions': num_actions}
+    input_channels = env.observation_space.shape[2]
+    num_actions = env.action_space.n
+    
+    net_config = {'input_channels': input_channels, 'num_actions': num_actions}
     env.close()
     
-    print(f"Network Config: Input={input_dim}, Actions={num_actions}")
+    print(f"Network Config: Input Channels={input_channels}, Actions={num_actions}")
     
-    network = CNNChessNet(input_dim, num_actions)
+    network = CNNChessNet(input_channels, num_actions)
     if device == 'cuda':
         network = network.cuda()
     
@@ -524,5 +525,5 @@ if __name__ == "__main__":
     network = train_with_parallel_mcts(
         iterations=50, 
         games_per_iter=20,
-        num_workers=max(1, mp.cpu_count() - 2)
+        num_workers=max(1, 1)
     )
