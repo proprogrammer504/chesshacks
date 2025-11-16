@@ -3,6 +3,7 @@
 import numpy as np
 import math
 import chess
+import time
 from chess_board import ChessBoard
 from encoder_decoder import encode_board, decode_policy_output, get_legal_moves_mask
 import config
@@ -305,7 +306,7 @@ class MCTS:
         if winner is None:
             return 0.0
         
-        # Value is from current player's perspective
+        # Value is from the perspective of the player at the leaf
         # Note: At terminal state, it's the previous player who made the winning move
         # So we need to flip the value
         return -float(winner * current_player)
@@ -324,28 +325,6 @@ class MCTS:
             node.update(value)
             value = -value  # Flip value for parent's perspective
 
-
-def self_play_game(neural_net, num_simulations=800, temperature_threshold=30, verbose=False):
-    """
-    Play a single self-play game using MCTS
-    
-    Args:
-        neural_net: Neural network for move selection
-        num_simulations: Number of MCTS simulations per move
-        temperature_threshold: Move number after which to use greedy selection
-        verbose: Whether to print game progress
-        
-    Returns:
-        list: List of (board_state, policy, value) tuples
-    """
-    board = ChessBoard()
-    mcts = MCTS(neural_net, num_simulations=num_simulations)
-    
-    training_examples = []
-    move_count = 0
-    
-import time
-import numpy as np
 
 def self_play_game(neural_net, num_simulations=800, temperature_threshold=30, verbose=False):
     """
@@ -411,20 +390,6 @@ def self_play_game(neural_net, num_simulations=800, temperature_threshold=30, ve
             print(f"   📋 Board:")
             print(board)
         
-        if not verbose:
-            if move_count % 10 == 0:
-                print(f"Move {move_count}: Searching with {num_simulations} simulations...")
-                print(f"  → Selected: {move} (temp={temperature:.1f})")
-        
-        if verbose and move_count % 10 == 0:
-            print(f"Move {move_count}: Searching with {num_simulations} simulations...")
-        
-        # Perform MCTS search
-        move, policy_target = mcts.search(board, add_noise=True, temperature=temperature)
-        
-        if verbose and move_count % 10 == 0:
-            print(f"  → Selected: {move} (temp={temperature:.1f})")
-        
         # Store training example
         board_encoding = encode_board(board)
         training_examples.append({
@@ -435,6 +400,11 @@ def self_play_game(neural_net, num_simulations=800, temperature_threshold=30, ve
         
         # Make move
         board.make_move(move)
+        
+        # Show basic progress every 10 moves if not verbose
+        if not verbose and move_count % 10 == 0:
+            print(f"Move {move_count}: Searching with {num_simulations} simulations...")
+            print(f"  → Selected: {move} (temp={temperature:.1f})")
     
     # Get game result
     winner = board.get_winner()
