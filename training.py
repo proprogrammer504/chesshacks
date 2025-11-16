@@ -691,7 +691,7 @@ def parallel_self_play_worker_optimized_fixed(worker_id, network_state_dict, num
                     break
                 
                 # OPTIMIZATION: Fast step penalty calculation
-                step_penalty = -0.05 * move_count
+                step_penalty = -0.005 * move_count
                 game_data.append((encoded_state, action_probs, None, step_penalty))
                 
                 action_int = env.encode(move)
