@@ -51,8 +51,8 @@ class ChessDataset(Dataset):
         }
 
 
-def train_network(model, training_examples, num_epochs=10, batch_size=256, 
-                  learning_rate=0.001, weight_decay=1e-4, device='cpu'):
+def train_network(model, training_examples, num_epochs=10, batch_size=256,
+                  learning_rate=0.001, weight_decay=1e-4, device='cpu', verbose=True):
     """
     Train neural network on training examples
     
@@ -64,6 +64,7 @@ def train_network(model, training_examples, num_epochs=10, batch_size=256,
         learning_rate: Learning rate for optimizer
         weight_decay: Weight decay for regularization
         device: Device to train on ('cpu' or 'cuda')
+        verbose: Whether to show progress bars and detailed output
         
     Returns:
         dict: Training statistics
@@ -89,6 +90,12 @@ def train_network(model, training_examples, num_epochs=10, batch_size=256,
         'total_losses': []
     }
     
+    print(f"\n📚 Training on {len(training_examples)} examples")
+    print(f"   🔢 Batch size: {batch_size}")
+    print(f"   📊 Epochs: {num_epochs}")
+    print(f"   📈 Learning rate: {learning_rate}")
+    print(f"   ⚙️  Device: {device}\n")
+    
     # Training loop
     for epoch in range(num_epochs):
         epoch_policy_loss = 0.0
@@ -96,7 +103,10 @@ def train_network(model, training_examples, num_epochs=10, batch_size=256,
         epoch_total_loss = 0.0
         num_batches = 0
         
-        progress_bar = tqdm(dataloader, desc=f"Epoch {epoch + 1}/{num_epochs}")
+        if verbose:
+            progress_bar = tqdm(dataloader, desc=f"Epoch {epoch + 1}/{num_epochs}")
+        else:
+            progress_bar = dataloader
         
         for batch in progress_bar:
             board_states = batch['board'].to(device)
@@ -128,11 +138,12 @@ def train_network(model, training_examples, num_epochs=10, batch_size=256,
             num_batches += 1
             
             # Update progress bar
-            progress_bar.set_postfix({
-                'policy_loss': policy_loss.item(),
-                'value_loss': value_loss.item(),
-                'total_loss': total_loss.item()
-            })
+            if verbose and hasattr(progress_bar, 'set_postfix'):
+                progress_bar.set_postfix({
+                    'policy_loss': policy_loss.item(),
+                    'value_loss': value_loss.item(),
+                    'total_loss': total_loss.item()
+                })
         
         # Calculate average losses for epoch
         avg_policy_loss = epoch_policy_loss / num_batches
@@ -143,10 +154,11 @@ def train_network(model, training_examples, num_epochs=10, batch_size=256,
         stats['value_losses'].append(avg_value_loss)
         stats['total_losses'].append(avg_total_loss)
         
-        print(f"Epoch {epoch + 1} - "
-              f"Policy Loss: {avg_policy_loss:.4f}, "
-              f"Value Loss: {avg_value_loss:.4f}, "
-              f"Total Loss: {avg_total_loss:.4f}")
+        if verbose:
+            print(f"   Epoch {epoch + 1}/{num_epochs} - "
+                  f"Policy: {avg_policy_loss:.4f}, "
+                  f"Value: {avg_value_loss:.4f}, "
+                  f"Total: {avg_total_loss:.4f}")
     
     return stats
 
@@ -189,7 +201,7 @@ def save_training_data(training_examples, filepath):
 
 
 def train_from_self_play(model, self_play_games, num_epochs=None, batch_size=None,
-                         learning_rate=None, checkpoint_path=None, device=None):
+                         learning_rate=None, checkpoint_path=None, device=None, verbose=True):
     """
     Train model from self-play games
     
@@ -201,6 +213,7 @@ def train_from_self_play(model, self_play_games, num_epochs=None, batch_size=Non
         learning_rate: Learning rate (default from config)
         checkpoint_path: Path to save checkpoint
         device: Device to train on (default from config)
+        verbose: Whether to show detailed training progress
         
     Returns:
         dict: Training statistics
@@ -220,19 +233,21 @@ def train_from_self_play(model, self_play_games, num_epochs=None, batch_size=Non
     for game in self_play_games:
         training_examples.extend(game)
     
-    print(f"Training on {len(training_examples)} examples from {len(self_play_games)} games")
+    if verbose:
+        print(f"🎯 Training on {len(training_examples)} examples from {len(self_play_games)} games")
     
     # Train network
     stats = train_network(model, training_examples, num_epochs=num_epochs,
                          batch_size=batch_size, learning_rate=learning_rate,
-                         weight_decay=config.WEIGHT_DECAY, device=device)
+                         weight_decay=config.WEIGHT_DECAY, device=device, verbose=verbose)
     
     # Save checkpoint if path provided
     if checkpoint_path:
-        optimizer = optim.Adam(model.parameters(), lr=learning_rate, 
+        optimizer = optim.Adam(model.parameters(), lr=learning_rate,
                               weight_decay=config.WEIGHT_DECAY)
         save_checkpoint(model, optimizer, 0, checkpoint_path)
-        print(f"Checkpoint saved to {checkpoint_path}")
+        if verbose:
+            print(f"💾 Checkpoint saved to {checkpoint_path}")
     
     return stats
 

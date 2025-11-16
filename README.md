@@ -121,6 +121,7 @@ Options:
   --eval-frequency N   Evaluate every N iterations (default: 5)
   --resume PATH        Resume from checkpoint
   --device DEVICE      Device to use: cpu or cuda (default: cuda)
+  --verbose            Enable verbose output for detailed progress
 ```
 
 ### Examples

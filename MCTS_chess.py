@@ -325,7 +325,7 @@ class MCTS:
             value = -value  # Flip value for parent's perspective
 
 
-def self_play_game(neural_net, num_simulations=800, temperature_threshold=30):
+def self_play_game(neural_net, num_simulations=800, temperature_threshold=30, verbose=False):
     """
     Play a single self-play game using MCTS
     
@@ -333,6 +333,7 @@ def self_play_game(neural_net, num_simulations=800, temperature_threshold=30):
         neural_net: Neural network for move selection
         num_simulations: Number of MCTS simulations per move
         temperature_threshold: Move number after which to use greedy selection
+        verbose: Whether to print game progress
         
     Returns:
         list: List of (board_state, policy, value) tuples
@@ -343,14 +344,25 @@ def self_play_game(neural_net, num_simulations=800, temperature_threshold=30):
     training_examples = []
     move_count = 0
     
+    if verbose:
+        print(f"\n{'='*60}")
+        print(f"Starting Self-Play Game")
+        print(f"{'='*60}")
+    
     while not board.is_game_over() and move_count < config.MAX_GAME_LENGTH:
         move_count += 1
         
         # Use temperature for exploration in early game
         temperature = config.TEMPERATURE if move_count < temperature_threshold else 0.0
         
+        if verbose and move_count % 10 == 0:
+            print(f"Move {move_count}: Searching with {num_simulations} simulations...")
+        
         # Perform MCTS search
         move, policy_target = mcts.search(board, add_noise=True, temperature=temperature)
+        
+        if verbose and move_count % 10 == 0:
+            print(f"  → Selected: {move} (temp={temperature:.1f})")
         
         # Store training example
         board_encoding = encode_board(board)
@@ -367,6 +379,12 @@ def self_play_game(neural_net, num_simulations=800, temperature_threshold=30):
     winner = board.get_winner()
     if winner is None:
         winner = 0  # Draw
+    
+    if verbose:
+        result_str = "White wins" if winner == 1 else "Black wins" if winner == -1 else "Draw"
+        print(f"\nGame finished: {result_str} after {move_count} moves")
+        print(f"Generated {len(training_examples)} training examples")
+        print(f"{'='*60}\n")
     
     # Add game result to all training examples
     for example in training_examples:

@@ -13,7 +13,7 @@ from MCTS_chess import self_play_game
 from train import train_from_self_play, save_training_data
 
 
-def worker_self_play(worker_id, model_state_dict, num_games, result_queue, num_simulations):
+def worker_self_play(worker_id, model_state_dict, num_games, result_queue, num_simulations, verbose=False):
     """
     Worker function for parallel self-play
     
@@ -23,6 +23,7 @@ def worker_self_play(worker_id, model_state_dict, num_games, result_queue, num_s
         num_games: Number of games this worker should play
         result_queue: Queue to put results
         num_simulations: Number of MCTS simulations per move
+        verbose: Whether to print detailed game progress
     """
     # Create model and load weights
     model = create_alpha_net()
@@ -32,26 +33,31 @@ def worker_self_play(worker_id, model_state_dict, num_games, result_queue, num_s
     # Move to CPU for workers (to avoid CUDA issues with multiprocessing)
     model = model.cpu()
     
-    print(f"Worker {worker_id} starting {num_games} games...")
+    print(f"🤖 Worker {worker_id} starting {num_games} games...")
     
     games = []
     for game_idx in range(num_games):
         try:
             # Play one game
-            training_examples = self_play_game(model, num_simulations=num_simulations)
+            training_examples = self_play_game(model, num_simulations=num_simulations, verbose=verbose)
             games.append(training_examples)
             
-            if (game_idx + 1) % 10 == 0:
-                print(f"Worker {worker_id} completed {game_idx + 1}/{num_games} games")
+            # Progress updates
+            if (game_idx + 1) % 5 == 0:
+                print(f"   Worker {worker_id}: {game_idx + 1}/{num_games} games complete "
+                      f"({len(training_examples)} examples in last game)")
+            elif verbose:
+                print(f"   Worker {worker_id}: Game {game_idx + 1} done - {len(training_examples)} examples")
         except Exception as e:
-            print(f"Worker {worker_id} error in game {game_idx}: {e}")
+            print(f"❌ Worker {worker_id} error in game {game_idx}: {e}")
     
     # Put results in queue
     result_queue.put((worker_id, games))
-    print(f"Worker {worker_id} finished!")
+    total_examples = sum(len(game) for game in games)
+    print(f"✅ Worker {worker_id} finished! Generated {len(games)} games with {total_examples} total examples")
 
 
-def generate_self_play_games_parallel(model, num_games, num_workers=None, num_simulations=None):
+def generate_self_play_games_parallel(model, num_games, num_workers=None, num_simulations=None, verbose=False):
     """
     Generate self-play games in parallel using multiprocessing
     
@@ -60,6 +66,7 @@ def generate_self_play_games_parallel(model, num_games, num_workers=None, num_si
         num_games: Total number of games to generate
         num_workers: Number of parallel workers (default: CPU count)
         num_simulations: Number of MCTS simulations per move (default from config)
+        verbose: Whether to print detailed progress
         
     Returns:
         list: List of games (each game is a list of training examples)
@@ -70,7 +77,8 @@ def generate_self_play_games_parallel(model, num_games, num_workers=None, num_si
     if num_simulations is None:
         num_simulations = config.NUM_MCTS_SIMS
     
-    print(f"Generating {num_games} games using {num_workers} workers...")
+    print(f"\n🎮 Generating {num_games} self-play games using {num_workers} workers...")
+    print(f"   {num_simulations} MCTS simulations per move")
     
     # Get model state dict
     model_state_dict = model.state_dict()
@@ -91,7 +99,7 @@ def generate_self_play_games_parallel(model, num_games, num_workers=None, num_si
         if worker_games > 0:
             p = mp.Process(
                 target=worker_self_play,
-                args=(worker_id, model_state_dict, worker_games, result_queue, num_simulations)
+                args=(worker_id, model_state_dict, worker_games, result_queue, num_simulations, verbose)
             )
             p.start()
             processes.append(p)
@@ -99,13 +107,18 @@ def generate_self_play_games_parallel(model, num_games, num_workers=None, num_si
     # Collect results
     all_games = []
     completed_workers = 0
+    total_examples = 0
+    
+    print(f"\n📊 Collecting results from workers...")
     
     while completed_workers < len(processes):
         try:
             worker_id, games = result_queue.get(timeout=1)
+            examples = sum(len(game) for game in games)
             all_games.extend(games)
+            total_examples += examples
             completed_workers += 1
-            print(f"Collected results from worker {worker_id} "
+            print(f"   ✓ Worker {worker_id}: {len(games)} games, {examples} examples "
                   f"({completed_workers}/{len(processes)} workers done)")
         except:
             pass
@@ -114,13 +127,13 @@ def generate_self_play_games_parallel(model, num_games, num_workers=None, num_si
     for p in processes:
         p.join()
     
-    print(f"Generated {len(all_games)} games total")
+    print(f"\n✅ Self-play complete: {len(all_games)} games, {total_examples} training examples")
     return all_games
 
 
-def train_iteration_multiprocessing(model, iteration, num_self_play_games=None, 
-                                   num_workers=None, checkpoint_dir=None, 
-                                   data_dir=None, device=None):
+def train_iteration_multiprocessing(model, iteration, num_self_play_games=None,
+                                   num_workers=None, checkpoint_dir=None,
+                                   data_dir=None, device=None, verbose=False):
     """
     Run one training iteration with multiprocessing self-play
     
@@ -132,6 +145,7 @@ def train_iteration_multiprocessing(model, iteration, num_self_play_games=None,
         checkpoint_dir: Directory to save checkpoints (default from config)
         data_dir: Directory to save training data (default from config)
         device: Device for training (default from config)
+        verbose: Whether to print detailed progress
         
     Returns:
         tuple: (model, stats)
@@ -150,23 +164,26 @@ def train_iteration_multiprocessing(model, iteration, num_self_play_games=None,
     print(f"{'='*60}")
     
     # Generate self-play games
-    print("\n[1/3] Generating self-play games...")
+    print("\n[1/3] 🎮 SELF-PLAY PHASE")
+    print("-" * 60)
     start_time = time.time()
     self_play_games = generate_self_play_games_parallel(
-        model, num_self_play_games, num_workers=num_workers
+        model, num_self_play_games, num_workers=num_workers, verbose=verbose
     )
     self_play_time = time.time() - start_time
-    print(f"Self-play completed in {self_play_time:.2f} seconds")
+    print(f"⏱️  Self-play time: {self_play_time:.2f}s")
     
     # Save training data
-    print("\n[2/3] Saving training data...")
+    print(f"\n[2/3] 💾 SAVING DATA")
+    print("-" * 60)
     os.makedirs(data_dir, exist_ok=True)
     data_filepath = os.path.join(data_dir, f"iteration_{iteration:04d}.npy")
     save_training_data(self_play_games, data_filepath)
-    print(f"Saved to {data_filepath}")
+    print(f"✅ Saved to {data_filepath}")
     
     # Train network
-    print("\n[3/3] Training neural network...")
+    print(f"\n[3/3] 🧠 TRAINING NEURAL NETWORK")
+    print("-" * 60)
     start_time = time.time()
     os.makedirs(checkpoint_dir, exist_ok=True)
     checkpoint_path = os.path.join(checkpoint_dir, f"checkpoint_iter_{iteration:04d}.pth")
@@ -177,10 +194,12 @@ def train_iteration_multiprocessing(model, iteration, num_self_play_games=None,
         device=device
     )
     train_time = time.time() - start_time
-    print(f"Training completed in {train_time:.2f} seconds")
+    print(f"⏱️  Training time: {train_time:.2f}s")
     
-    print(f"\nIteration {iteration} complete!")
-    print(f"Total time: {self_play_time + train_time:.2f} seconds")
+    print(f"\n{'='*60}")
+    print(f"✅ Iteration {iteration} complete!")
+    print(f"⏱️  Total time: {self_play_time + train_time:.2f}s")
+    print(f"{'='*60}")
     
     return model, stats
 

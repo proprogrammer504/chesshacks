@@ -38,13 +38,13 @@ def example_2_mcts_search(model):
     
     # Create chess board
     board = ChessBoard()
-    print("Starting position:")
+    print("🎯 Starting position:")
     print(board)
     print()
     
     # Perform MCTS search
     mcts = MCTS(model, num_simulations=100)
-    print("Running MCTS with 100 simulations...")
+    print("🔍 Running MCTS with 100 simulations...")
     move, policy = mcts.search(board, add_noise=True, temperature=1.0)
     
     print(f"✓ Selected move: {move}")
@@ -55,14 +55,14 @@ def example_2_mcts_search(model):
     print()
 
 
-def example_3_self_play(model):
+def example_3_self_play(model, verbose=False):
     """Example 3: Generate one self-play game"""
     print("="*60)
     print("Example 3: Self-Play Game")
     print("="*60)
     
-    print("Playing one self-play game (50 simulations per move)...")
-    training_examples = self_play_game(model, num_simulations=50)
+    print("🎮 Playing one self-play game (50 simulations per move)...")
+    training_examples = self_play_game(model, num_simulations=50, verbose=verbose)
     
     print(f"✓ Game generated {len(training_examples)} training positions")
     print(f"✓ First position has {len(training_examples[0]['policy'])} possible moves")
@@ -72,22 +72,23 @@ def example_3_self_play(model):
     return training_examples
 
 
-def example_4_train(model, games):
+def example_4_train(model, games, verbose=True):
     """Example 4: Train on self-play games"""
     print("="*60)
     print("Example 4: Training Neural Network")
     print("="*60)
     
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    print(f"Using device: {device}")
+    print(f"💻 Using device: {device}")
     
-    print(f"Training on {len(games)} games for 2 epochs...")
+    print(f"🧠 Training on {len(games)} games for 2 epochs...")
     stats = train_from_self_play(
-        model, 
-        games, 
+        model,
+        games,
         num_epochs=2,
         batch_size=32,
-        device=device
+        device=device,
+        verbose=verbose
     )
     
     print(f"✓ Training complete")
@@ -101,7 +102,7 @@ def example_5_evaluate(model1, model2):
     print("Example 5: Model Evaluation")
     print("="*60)
     
-    print("Evaluating models (2 games, 50 simulations)...")
+    print("⚔️  Evaluating models (2 games, 50 simulations)...")
     results = quick_evaluate(model1, model2, num_games=2, num_simulations=50)
     
     print(f"✓ Model 1 wins: {results['model1_wins']}")
@@ -110,7 +111,7 @@ def example_5_evaluate(model1, model2):
     print()
 
 
-def main():
+def main(verbose=False):
     """Run all examples"""
     print("\n")
     print("*"*60)
@@ -120,6 +121,12 @@ def main():
     print("*"*60)
     print()
     
+    if verbose:
+        print("🗣️  Verbose mode: ON (detailed game progress)")
+    else:
+        print("🗣️  Verbose mode: OFF (summary only)")
+    print()
+    
     # Example 1: Create model
     model = example_1_create_model()
     
@@ -127,37 +134,43 @@ def main():
     example_2_mcts_search(model)
     
     # Example 3: Self-play
-    print("Generating self-play games...")
+    print("🎮 Generating self-play games...")
     games = []
     for i in range(2):
         print(f"Game {i+1}/2...")
-        game = example_3_self_play(model)
+        game = example_3_self_play(model, verbose=verbose)
         games.append(game)
     print()
     
     # Example 4: Training
-    example_4_train(model, games)
+    example_4_train(model, games, verbose=verbose)
     
     # Example 5: Evaluation (compare model with itself)
     model2 = create_alpha_net()
     example_5_evaluate(model, model2)
     
     print("="*60)
-    print("All Examples Complete!")
+    print("✅ All Examples Complete!")
     print("="*60)
     print()
-    print("Next steps:")
-    print("1. Run full training: python pipeline.py --iterations 5 --games 20")
-    print("2. Adjust config.py for your hardware")
-    print("3. Enable evaluation: python pipeline.py --iterations 10 --evaluate")
+    print("📚 Next steps:")
+    print("1. 🚀 Run full training: python pipeline.py --iterations 5 --games 20")
+    print("2. ⚙️  Adjust config.py for your hardware")
+    print("3. ⚔️  Enable evaluation: python pipeline.py --iterations 10 --evaluate")
+    print("4. 🗣️  Verbose mode: python pipeline.py --iterations 5 --verbose")
     print()
 
 
 if __name__ == "__main__":
+    import sys
+    
     # Set multiprocessing start method
     try:
         mp.set_start_method('spawn', force=True)
     except RuntimeError:
         pass
     
-    main()
+    # Check for verbose flag
+    verbose = '--verbose' in sys.argv or '-v' in sys.argv
+    
+    main(verbose=verbose)
