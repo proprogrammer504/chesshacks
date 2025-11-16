@@ -344,16 +344,77 @@ def self_play_game(neural_net, num_simulations=800, temperature_threshold=30, ve
     training_examples = []
     move_count = 0
     
+import time
+import numpy as np
+
+def self_play_game(neural_net, num_simulations=800, temperature_threshold=30, verbose=False):
+    """
+    Play a single self-play game using MCTS
+    
+    Args:
+        neural_net: Neural network for move selection
+        num_simulations: Number of MCTS simulations per move
+        temperature_threshold: Move number after which to use greedy selection
+        verbose: Whether to print game progress
+        
+    Returns:
+        list: List of (board_state, policy, value) tuples
+    """
+    board = ChessBoard()
+    mcts = MCTS(neural_net, num_simulations=num_simulations)
+    
+    training_examples = []
+    move_count = 0
+    
     if verbose:
         print(f"\n{'='*60}")
-        print(f"Starting Self-Play Game")
+        print(f"🎮 Starting Self-Play Game")
         print(f"{'='*60}")
+        print("Starting position:")
+        print(board)
+    
+    move_times = []
     
     while not board.is_game_over() and move_count < config.MAX_GAME_LENGTH:
         move_count += 1
         
         # Use temperature for exploration in early game
         temperature = config.TEMPERATURE if move_count < temperature_threshold else 0.0
+        
+        if verbose:
+            start_time = time.time()
+        
+        # Perform MCTS search
+        move, policy_target = mcts.search(board, add_noise=True, temperature=temperature)
+        
+        if verbose:
+            end_time = time.time()
+            move_time = end_time - start_time
+            move_times.append(move_time)
+            avg_move_time = np.mean(move_times)
+            
+            print(f"\n⚡ Move {move_count:3d}/{config.MAX_GAME_LENGTH}")
+            print(f"   ⏱️  Time: {move_time:.2f}s (avg: {avg_move_time:.2f}s)")
+            print(f"   🌡️  Temperature: {temperature:.1f}")
+            print(f"   🎯 Selected move: {move}")
+            
+            # Show legal moves count and policy distribution
+            legal_moves = board.get_legal_moves()
+            print(f"   📊 Legal moves: {len(legal_moves)}")
+            
+            # Show top 3 moves by probability
+            top_moves = sorted(policy_target.items(), key=lambda x: x[1], reverse=True)[:3]
+            print(f"   🏆 Top moves:")
+            for i, (m, prob) in enumerate(top_moves):
+                print(f"      {i+1}. {m}: {prob:.3f}")
+            
+            print(f"   📋 Board:")
+            print(board)
+        
+        if not verbose:
+            if move_count % 10 == 0:
+                print(f"Move {move_count}: Searching with {num_simulations} simulations...")
+                print(f"  → Selected: {move} (temp={temperature:.1f})")
         
         if verbose and move_count % 10 == 0:
             print(f"Move {move_count}: Searching with {num_simulations} simulations...")
@@ -381,6 +442,20 @@ def self_play_game(neural_net, num_simulations=800, temperature_threshold=30, ve
         winner = 0  # Draw
     
     if verbose:
+        result_str = "White wins  ✅" if winner == 1 else "Black wins ✅" if winner == -1 else "Draw 🤝"
+        avg_game_moves = move_count / len(move_times) if move_times else 0
+        
+        print(f"\n{'='*60}")
+        print(f"🏁 Game Finished!")
+        print(f"{'='*60}")
+        print(f"   🏆 Result: {result_str}")
+        print(f"   ⚡ Moves: {move_count}")
+        print(f"   ⏱️  Total time: {sum(move_times):.2f}s")
+        print(f"   📊 Avg time/move: {np.mean(move_times):.2f}s")
+        print(f"   📈 Examples generated: {len(training_examples)}")
+        print(f"{'='*60}\n")
+    
+    if not verbose:
         result_str = "White wins" if winner == 1 else "Black wins" if winner == -1 else "Draw"
         print(f"\nGame finished: {result_str} after {move_count} moves")
         print(f"Generated {len(training_examples)} training examples")
