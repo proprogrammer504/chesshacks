@@ -146,7 +146,7 @@ class OptimizedGPUBatchedEvaluator:
             
             # OPTIMIZATION: Mixed precision evaluation with autocast
             if self.device == 'cuda' and self.dtype == torch.float16:
-                with torch.cuda.amp.autocast():
+                with torch.amp.autocast('cuda'):
                     logits, values = self.network(states_tensor)
                     policies = F.softmax(logits, dim=-1)
             else:
@@ -622,6 +622,7 @@ def parallel_self_play_worker_optimized(worker_id, network_state_dict, num_games
                            dirichlet_alpha=0.3, dirichlet_epsilon=0.2)
         
         worker_data = []
+        game_statistics = []
         
         for game_num in range(num_games):
             encoded_state = env.reset()
@@ -631,6 +632,7 @@ def parallel_self_play_worker_optimized(worker_id, network_state_dict, num_games
             mcts.position_history.clear()
             
             game_end_reason = "ongoing"
+            game_start_time = time.time()
             
             while not env.unwrapped.unwrapped._board.is_game_over() and move_count < move_limit:
                 board = env.unwrapped.unwrapped._board.copy()
@@ -671,6 +673,8 @@ def parallel_self_play_worker_optimized(worker_id, network_state_dict, num_games
             
             # Determine final outcome
             board = env.unwrapped.unwrapped._board.copy()
+            game_end_time = time.time()
+            game_duration = game_end_time - game_start_time
             
             if game_end_reason == "ongoing":
                 if move_count >= move_limit:
@@ -694,8 +698,41 @@ def parallel_self_play_worker_optimized(worker_id, network_state_dict, num_games
                 final_value = player_outcome + step_penalty
                 worker_data.append((state, probs, final_value))
             
-            if (game_num + 1) % 5 == 0:
-                print(f"Worker {worker_id}: {game_num + 1}/{num_games} games completed")
+            # Collect detailed game statistics
+            game_stats = {
+                'game_number': game_num + 1,
+                'moves_played': move_count,
+                'game_duration': game_duration,
+                'end_reason': game_end_reason,
+                'outcome': outcome,
+                'positions_collected': len(game_data),
+                'moves_per_second': move_count / game_duration if game_duration > 0 else 0
+            }
+            game_statistics.append(game_stats)
+            
+            if (game_num + 1) % 5 == 0 or game_num == num_games - 1:
+                print(f"Worker {worker_id}: Game {game_num + 1}/{num_games} completed")
+                print(f"  Result: {game_end_reason}, Moves: {move_count}, Duration: {game_duration:.1f}s")
+        
+        # Print worker summary statistics
+        if game_statistics:
+            total_games = len(game_statistics)
+            avg_moves = np.mean([stats['moves_played'] for stats in game_statistics])
+            avg_duration = np.mean([stats['game_duration'] for stats in game_statistics])
+            avg_mps = np.mean([stats['moves_per_second'] for stats in game_statistics])
+            
+            # Count game results
+            result_counts = {}
+            for stats in game_statistics:
+                result = stats['end_reason']
+                result_counts[result] = result_counts.get(result, 0) + 1
+            
+            print(f"Worker {worker_id} Summary:")
+            print(f"  Total games: {total_games}")
+            print(f"  Average moves per game: {avg_moves:.1f}")
+            print(f"  Average game duration: {avg_duration:.1f}s")
+            print(f"  Average moves per second: {avg_mps:.1f}")
+            print(f"  Game results: {result_counts}")
         
         evaluator.shutdown()
         
@@ -759,11 +796,11 @@ def train_with_optimized_parallel_mcts(iterations=50, games_per_iter=200, num_wo
     if num_workers is None:
         num_workers = max(1, mp.cpu_count())
     
-    print(f"🚀 Using {num_workers} parallel workers for MAXIMUM PERFORMANCE")
-    print(f"🎯 Target: {games_per_iter} games per iteration")
+    print(f"Training with {num_workers} parallel workers for maximum performance")
+    print(f"Target: {games_per_iter} games per iteration")
     
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    print(f"🔥 Using device: {device}")
+    print(f"Using device: {device}")
     
     env = gym.make("Chess-v0")
     env = BoardEncoding(env, history_length=1)
@@ -780,7 +817,7 @@ def train_with_optimized_parallel_mcts(iterations=50, games_per_iter=200, num_wo
     }
     env.close()
     
-    print(f"⚡ Network Config: Input={input_channels}ch, Actions={num_actions}, ResBlocks={num_res_blocks}, Filters={num_filters}")
+    print(f"Network Config: Input={input_channels}ch, Actions={num_actions}, ResBlocks={num_res_blocks}, Filters={num_filters}")
     
     network = DeepResNetChess(input_channels, num_actions, num_res_blocks, num_filters)
     if device == 'cuda':
@@ -811,23 +848,23 @@ def train_with_optimized_parallel_mcts(iterations=50, games_per_iter=200, num_wo
     
     for iteration in range(iterations):
         print(f"\n{'='*60}")
-        print(f"⚡ OPTIMIZED ITERATION {iteration + 1}/{iterations}")
+        print(f"OPTIMIZED ITERATION {iteration + 1}/{iterations}")
         print(f"{'='*60}")
 
         # Update learning rate
         current_lr = get_learning_rate(iteration)
         for param_group in optimizer.param_groups:
             param_group['lr'] = current_lr
-        print(f"📈 Learning rate set to: {current_lr}")
+        print(f"Learning rate set to: {current_lr}")
 
         # OPTIMIZATION: Shorter move limits for faster games
         move_limit = max(60, 100 - iteration)
-        print(f"🏃 Move limit for this iteration: {move_limit}")
+        print(f"Move limit for this iteration: {move_limit}")
 
         network_state = {k: v.cpu() for k, v in network.state_dict().items()}
         
         games_per_worker = max(1, games_per_iter // num_workers)
-        print(f"🎮 Each of {num_workers} workers will play {games_per_worker} games")
+        print(f"Each of {num_workers} workers will play {games_per_worker} games")
         
         result_queue = mp.Queue()
         processes = []
@@ -846,6 +883,7 @@ def train_with_optimized_parallel_mcts(iterations=50, games_per_iter=200, num_wo
         iteration_data = []
         completed_workers = 0
         timeout_per_game = 120  # Reduced timeout
+        all_game_stats = []
 
         while completed_workers < num_workers:
             try:
@@ -853,9 +891,9 @@ def train_with_optimized_parallel_mcts(iterations=50, games_per_iter=200, num_wo
                 iteration_data.extend(worker_data)
                 completed_workers += 1
                 elapsed = time.time() - start_time
-                print(f"✅ Worker {completed_workers}/{num_workers} completed ({elapsed:.0f}s elapsed, {len(worker_data)} positions)")
+                print(f"Worker {completed_workers}/{num_workers} completed ({elapsed:.0f}s elapsed, {len(worker_data)} positions)")
             except queue.Empty:
-                print(f"⚠️ Worker timeout after {time.time() - start_time:.0f}s")
+                print(f"Worker timeout after {time.time() - start_time:.0f}s")
                 break
 
         for p in processes:
@@ -866,18 +904,33 @@ def train_with_optimized_parallel_mcts(iterations=50, games_per_iter=200, num_wo
 
         
         self_play_time = time.time() - start_time
-        games_per_second = len(iteration_data) / (50 * self_play_time) if self_play_time > 0 else 0
         
-        print(f"\n🎯 Self-play completed in {self_play_time:.1f}s")
-        print(f"⚡ Games per second: {games_per_second:.2f}")
-        print(f"📊 Collected {len(iteration_data)} training positions")
+        # Calculate detailed performance statistics
+        if iteration_data:
+            total_positions = len(iteration_data)
+            total_games = len(iteration_data) // 50  # Approximate
+            games_per_second = total_games / self_play_time if self_play_time > 0 else 0
+            positions_per_second = total_positions / self_play_time if self_play_time > 0 else 0
+        else:
+            total_positions = 0
+            total_games = 0
+            games_per_second = 0
+            positions_per_second = 0
+        
+        print(f"\nSelf-play performance summary:")
+        print(f"  Total self-play time: {self_play_time:.1f} seconds")
+        print(f"  Games completed: {total_games}")
+        print(f"  Positions collected: {total_positions}")
+        print(f"  Games per second: {games_per_second:.2f}")
+        print(f"  Positions per second: {positions_per_second:.0f}")
+        print(f"  Average positions per game: {total_positions // max(1, total_games)}")
         
         replay_buffer.extend(iteration_data)
         max_buffer_size = 150000  # Increased buffer size
         if len(replay_buffer) > max_buffer_size:
             replay_buffer = replay_buffer[-max_buffer_size:]
         
-        print(f"💾 Replay buffer size: {len(replay_buffer)} positions")
+        print(f"Replay buffer size: {len(replay_buffer)} positions")
         
         if len(replay_buffer) == 0:
             print("No data in replay buffer, skipping training.")
@@ -888,7 +941,7 @@ def train_with_optimized_parallel_mcts(iterations=50, games_per_iter=200, num_wo
         metrics_sample = [replay_buffer[i] for i in sample_indices]
         pre_metrics = compute_metrics(network, metrics_sample, device)
         
-        print(f"\n📈 Pre-training metrics:")
+        print(f"\nPre-training metrics:")
         print(f"  Value MSE: {pre_metrics['value_mse']:.4f}, MAE: {pre_metrics['value_mae']:.4f}")
         print(f"  Policy Entropy: {pre_metrics['policy_entropy']:.4f}, Accuracy: {pre_metrics['policy_accuracy']:.4f}")
         
@@ -896,7 +949,7 @@ def train_with_optimized_parallel_mcts(iterations=50, games_per_iter=200, num_wo
         batch_size = 512 if device == 'cuda' else 128
         num_epochs = 3
         
-        print(f"\n🔥 Training on replay buffer ({len(replay_buffer)} positions, {num_epochs} epochs)...")
+        print(f"\nTraining on replay buffer ({len(replay_buffer)} positions, {num_epochs} epochs)...")
         
         train_start = time.time()
         for epoch in range(num_epochs):
@@ -959,18 +1012,19 @@ def train_with_optimized_parallel_mcts(iterations=50, games_per_iter=200, num_wo
         train_time = time.time() - train_start
         
         post_metrics = compute_metrics(network, metrics_sample, device)
-        print(f"\n📈 Post-training metrics:")
+        print(f"\nPost-training metrics:")
         print(f"  Value MSE: {post_metrics['value_mse']:.4f}, MAE: {post_metrics['value_mae']:.4f}")
         print(f"  Policy Entropy: {post_metrics['policy_entropy']:.4f}, Accuracy: {post_metrics['policy_accuracy']:.4f}")
         
         log_entry = {
             'iteration': iteration + 1,
             'move_limit': move_limit,
-            'games_generated': len(iteration_data) // 50,
-            'positions': len(iteration_data),
+            'games_generated': total_games,
+            'positions': total_positions,
             'replay_buffer_size': len(replay_buffer),
             'self_play_time': self_play_time,
             'games_per_second': games_per_second,
+            'positions_per_second': positions_per_second,
             'train_time': train_time,
             'pre_metrics': pre_metrics,
             'post_metrics': post_metrics,
@@ -990,7 +1044,7 @@ def train_with_optimized_parallel_mcts(iterations=50, games_per_iter=200, num_wo
                 'optimizer_state_dict': optimizer.state_dict(),
                 'net_config': net_config
             }, checkpoint_path)
-            print(f"💾 Checkpoint saved: {checkpoint_path}")
+            print(f"Checkpoint saved: {checkpoint_path}")
     
     return network
 
@@ -1005,4 +1059,4 @@ if __name__ == "__main__":
     )
     
     torch.save(network.state_dict(), "chess_resnet_final_optimized.pt")
-    print("\n🚀 OPTIMIZED Training complete! Final model saved.")
+    print("\nOPTIMIZED Training complete! Final model saved.")
